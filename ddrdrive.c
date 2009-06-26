@@ -100,6 +100,37 @@ static struct pci_device_id ids[] = {
 };
 MODULE_DEVICE_TABLE(pci, ids);
 
+static void ddr_write32(struct ddr *ddr, u32 off, u32 val)
+{
+	writel(val, ddr->bar0 + off);
+}
+
+static u32 ddr_read32(struct ddr *ddr, u32 off)
+{
+        return (readl(ddr->bar0 + off));
+}
+
+static void ddr_init(struct ddr *ddr)
+{
+	u32 value;
+
+	value = ddr_read32(ddr, BACKUP_RESTORE_STATUS);
+	if (((value & 0x80000000) != 0x0) || ((value & 0x40000000) != 0x0))
+		ddr->hba_state = 0x01;
+	else
+		ddr->hba_state = 0x00;
+
+	ddr->queue_head = 0x00;
+	ddr->queue_tail = 0x00;
+	ddr->queue_count = 0x00;
+
+	ddr->brick_state = ddr_read32(ddr, AC_ADAPTER_REG) >> 0x1f;
+	ddr->last_sector = 0x007BFFFF;
+
+	ddr_write32(ddr, EXT_LED_CONTROL_REG, 0x20000001);
+	ddr_write32(ddr, INT_CONTROL_REG, 0xF0000000);
+}
+
 static int __devinit ddr_probe(struct pci_dev *pdev,
 			       const struct pci_device_id *id)
 {
@@ -146,6 +177,8 @@ static int __devinit ddr_probe(struct pci_dev *pdev,
 	}
 
 	pci_set_drvdata(pdev, ddr);
+
+	ddr_init(ddr);
 
 	return 0;
 
