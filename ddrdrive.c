@@ -146,6 +146,79 @@ static void ddr_read_serial_number(struct ddr *ddr)
 	ddr->serial_number = ddr_read32(ddr, 0x30);
 }
 
+static irqreturn_t ddr_irq(int irq, void *dev_id)
+{
+	struct ddr *ddr = dev_id;
+	u32 completions;
+	u32 status;
+	u32 result;
+
+	status = ddr_read32(ddr, INT_STATUS_REG);
+	result = status & ANY_INTERRUPT_MASK;
+	if (result == 0x00) {
+		/* not our interrupt */
+		return IRQ_RETVAL(0);
+	}
+
+	completions = status & SGL_COMPLETION_MASK;
+	if (completions > ddr->queue_count) {
+		dev_dbg(&ddr->pdev->dev,
+			"%s: #completed > #queued! completions=0x%x queued=0x%x.\n",
+			__func__, completions, ddr->queue_count);
+		return IRQ_RETVAL(0);
+	}
+
+	result = status << 0x8;
+	if (status & BRICK_PWR_ON_MASK)
+		result = result | 0x80000000;
+	if (status & BRICK_PWR_OFF_MASK)
+		result = result | 0x20000000;
+	if (status & BACKUP_COMPLETE_MASK)
+		result = result | 0x08000000;
+	if (status & RESTORE_COMPLETE_MASK)
+		result = result | 0x02000000;
+	ddr_write32(ddr, INT_STATUS_REG, result);
+
+	/*
+	 * FIXME
+	 * Handle queue completions here
+	 */
+
+	if (status & BRICK_PWR_ON_MASK) {
+		dev_dbg(&ddr->pdev->dev, "%s: BRICK_PWR_ON. status=0x%x\n",
+			__func__, status);
+		ddr->brick_state = 0x01;
+		}
+	if (status & BRICK_PWR_OFF_MASK) {
+		dev_dbg(&ddr->pdev->dev, "%s: BRICK_PWR_OFF. status=0x%x\n",
+			__func__, status);
+		ddr->brick_state = 0x00;
+	}
+
+	if (status & BACKUP_COMPLETE_MASK) {
+		dev_dbg(&ddr->pdev->dev, "%s: BACKUP_COMPLETE. status=0x%x\n",
+			__func__, status);
+
+		ddr->hba_state = 0x00;
+		ddr_write32(ddr, LED_RED_CONTROL, LED_TURN_OFF);
+
+		/* FIXME add backup complete logic here */
+	}
+
+	if (status & RESTORE_COMPLETE_MASK) {
+		dev_dbg(&ddr->pdev->dev, "%s: RESTORE_COMPLETE. status=0x%x\n",
+			__func__, status);
+
+		ddr->hba_state = 0x00;
+		ddr_write32(ddr, LED_YELLOW_CONTROL, LED_TURN_OFF);
+
+		/* FIXME add restore complete logic here */
+		}
+
+	return IRQ_RETVAL(1);
+}
+
+
 static int __devinit ddr_probe(struct pci_dev *pdev,
 			       const struct pci_device_id *id)
 {
