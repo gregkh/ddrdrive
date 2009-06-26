@@ -91,6 +91,7 @@ struct ddr {
 	u32				hba_state;
 	u32				brick_state;
 	u32				last_sector;
+	u32				serial_number;
 };
 
 
@@ -129,6 +130,20 @@ static void ddr_init(struct ddr *ddr)
 
 	ddr_write32(ddr, EXT_LED_CONTROL_REG, 0x20000001);
 	ddr_write32(ddr, INT_CONTROL_REG, 0xF0000000);
+}
+
+static void ddr_read_serial_number(struct ddr *ddr)
+{
+	u32 value;
+
+	ddr_write32(ddr, 0x2C, 0x001C0000);
+	ddr_write32(ddr, 0x24, 0x08000000);
+	do {
+		value = ddr_read32(ddr, 0x28);
+		dev_info(&ddr->pdev->dev, "%s: value = 0x%x\n", __func__, value);
+	} while (value != 0x00);
+
+	ddr->serial_number = ddr_read32(ddr, 0x30);
 }
 
 static int __devinit ddr_probe(struct pci_dev *pdev,
@@ -179,6 +194,8 @@ static int __devinit ddr_probe(struct pci_dev *pdev,
 	pci_set_drvdata(pdev, ddr);
 
 	ddr_init(ddr);
+	ddr_read_serial_number(ddr);
+	dev_info(&pdev->dev, "serial number = 0x%x\n", ddr->serial_number);
 
 	return 0;
 
