@@ -74,8 +74,10 @@ struct dma_group {
 /*
  * DDRdrive X1 Device Extension
  */
-struct ddr_ext {
-	u8				*bar0;
+struct ddr {
+	void __iomem			*bar0;
+	int				pm_cap;
+	struct pci_dev			*pdev;
 	u8				*virt_sg_list;
 	u32				phys_sg_list;
 	u32				queue_head;
@@ -101,11 +103,72 @@ MODULE_DEVICE_TABLE(pci, ids);
 static int __devinit ddr_probe(struct pci_dev *pdev,
 			       const struct pci_device_id *id)
 {
+	struct ddr *ddr;
+	int pm_cap;
+	int error;
+
+	error = pci_enable_device(pdev);
+	if (error) {
+		dev_err(&pdev->dev, "Can not enable device\n");
+		return error;
+	}
+
+	error = pci_request_regions(pdev, KBUILD_MODNAME);
+	if (error) {
+		dev_err(&pdev->dev, "Can not obtain PCI resources\n");
+		goto error_disable;
+	}
+
+	pci_set_master(pdev);
+
+	pm_cap = pci_find_capability(pdev, PCI_CAP_ID_PM);
+	if (pm_cap == 0) {
+		dev_err(&pdev->dev, "Can not find power capability\n");
+		error = -EIO;
+		goto error_free_resource;
+	}
+
+	ddr = kzalloc(sizeof(*ddr), GFP_KERNEL);
+	if (!ddr) {
+		dev_err(&pdev->dev, "Out of memory\n");
+		error = -ENOMEM;
+		goto error_free_resource;
+	}
+
+	ddr->pdev = pdev;
+	ddr->pm_cap = pm_cap;
+
+	ddr->bar0 = pci_ioremap_bar(pdev, 0);
+	if (!ddr->bar0) {
+		dev_err(&pdev->dev, "Can not map registers\n");
+		error = -ENOMEM;
+		goto error_free_ddr;
+	}
+
+	pci_set_drvdata(pdev, ddr);
+
 	return 0;
+
+error_free_ddr:
+	kfree(ddr);
+
+error_free_resource:
+	pci_release_regions(pdev);
+
+error_disable:
+	pci_disable_device(pdev);
+	return error;
 }
 
 static void __devexit ddr_remove(struct pci_dev *pdev)
 {
+	struct ddr *ddr = pci_get_drvdata(pdev);
+
+	iounmap(ddr->bar0);
+	pci_release_regions(pdev);
+	pci_disable_device(pdev);
+	pci_set_drvdata(pdev, NULL);
+	kfree(ddr);
 }
 
 static int ddr_suspend(struct pci_dev *pdev, pm_message_t state)
